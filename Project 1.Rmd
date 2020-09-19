@@ -1,0 +1,267 @@
+---
+title: "Project 1 - Chess Tournament Data"
+author: "Stefano Biguzzi"
+date: "9/9/2020"
+output:
+  html_document:
+    includes:
+      in_header: header.html
+    # css: ./lab.css
+    highlight: pygments
+    theme: cerulean
+    toc: true
+    toc_float: true
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE)
+```
+
+# Introduction
+In this project, you’re given a text file with chess tournament results where the information has some structure.
+
+Your job is to create an R Markdown file that generates a .CSV file (that could for example be imported into a SQL database) with the following information for all of the players:
+
+* Player’s Name
+* Player’s State
+* Total Number of Points
+* Player’s Pre-Rating
+* Average Pre Chess Rating of Opponents
+
+# Loading packages
+These are the packages that will be necessary to complete the following conversion of the Chess Tournament Data.
+```{r loading-packages, comment=NA, warning=FALSE, echo=TRUE, message=FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+```
+
+# Load raw data from Github
+The first step is to load the data into r from the text file.
+```{r load-raw-data, echo=TRUE}
+setwd("C:/Users/biguz/Desktop/CUNY Data Science/Fall2020/Data 607/Projects/Project 1")
+tournament_data <- readLines("tournamentinfo.txt", warn=FALSE)
+```
+
+This data gets read into r as a one large string so we will need to use some string operations to get it to a usable data frame and get it ready to export the data into a csv file.
+
+```{r example-df, results='asis'}
+kable(head(data.frame(tournament_data),7), caption = "How initial load of data looks: (first 7 rows as example)") %>%
+  kable_minimal()
+```
+
+We want to change the data so the lines are gone and all the data between the lines shows up in one row and not two.
+
+# Data munging to create readable dataframe
+In this section I used some techniques to change the data from the table shown above to a more readable data frame, where it would be possible to create the CSV file requested.
+
+1. I removed the lines from the data string and replaced where there was more than one space between characters.
+```{r cleaning-string, echo=T}
+lines <-
+  c('-----------------------------------------------------------------------------------------')
+tournament_data <- tournament_data[!(tournament_data == lines)]
+tournament_data <- str_replace(tournament_data," {2}","")
+```
+
+2. I created a data frame. Creating this data frame helps me in a later step by allowing me to merge odd rows with even rows. I also noticed an extra column was created so I removed it as it was duplicate information.
+```{r creating-dataframe, echo=T}
+#Create dataframe
+tournament_raw_df <- data.frame(do.call(rbind, strsplit(tournament_data, "|", fixed=TRUE)))
+tournament_raw_df <- tournament_raw_df[-c(11)]
+```
+
+3. I realized that for each participant of the tournament there are 2 rows. I had to merge the even row to each odd row using "|" as a separator. After merging the rows I removed every odd row since it was now excess data.
+```{r merge-row-data, echo=TRUE, warning=FALSE, comment=NA}
+#Merge row data
+for (column in names(tournament_raw_df)){
+  for (i in 1:nrow(tournament_raw_df)){
+    if((i %% 2) > 0){
+		  tournament_raw_df[i,column] <-
+		    paste(tournament_raw_df[i,column], tournament_raw_df[i+1,column],sep="|")}}}
+
+#Removing odd rows
+toKeep <- seq(3,nrow(tournament_raw_df),2)
+tournament_raw_df <- tournament_raw_df[toKeep,]
+```
+
+4. I rejoined the data frame into a new data frame splitting on the separator "|". This allowed me to create a more readable data frame.
+```{r joining-everything-together, echo=TRUE, warning=FALSE, comment=NA}
+#Creating new clean dataframe
+df_args <- c(tournament_raw_df, sep="|")
+tournament_raw_df <- do.call(paste,df_args)
+tournament_df <- data.frame(do.call(rbind, strsplit(tournament_raw_df, "|", fixed=TRUE)))
+
+#Renaming columns
+tournament_df <- rename(tournament_df,
+  c("Pair Num" = "X1", "State" = "X2", "Player Name" = "X3", "USCF ID / Rtg (Pre->Post)" = "X4",
+    "Total Pts" = "X5","N Count" = "X6","Round 1 Outcome" = "X7", "Round 1 Pieces" = "X8", 
+    "Round 2 Outcome" = "X9", "Round 2 Pieces" = "X10", "Round 3 Outcome" = "X11",
+    "Round 3 Pieces" = "X12", "Round 4 Outcome" = "X13", "Round 4 Pieces" = "X14",
+    "Round 5 Outcome" = "X15", "Round 5 Pieces" = "X16", "Round 6 Outcome" = "X17",
+    "Round 6 Pieces" = "X18", "Round 7 Outcome" = "X19", "Round 7 Pieces" = "X20"))
+```
+
+5. I renamed the values for which the chess pieces were identified for each round. So "W" became "White" and "B" became "Black"
+```{r replace-pieces, echo=TRUE}
+for (col in names(tournament_df)){
+  if (grepl("Pieces",col)){
+    tournament_df[,c(col)] = ifelse(grepl("W",tournament_df[,c(col)]),"White","Black")}}
+```
+
+6. I decided to continue splitting the data frame to create individual columns for each participant USCF ID and each participants rating pre tournament and post tournament rating
+```{r splitting-id-rating, echo=TRUE}
+#Creating ID column
+tournament_df$USCFID <-
+  unlist(lapply(
+    strsplit(as.character(tournament_df[,c("USCF ID / Rtg (Pre->Post)")]), " / "), '[', 1))
+
+#Creating pre-post column
+tournament_df$"Rtg (Pre->Post)" <-
+  unlist(lapply(
+    strsplit(as.character(tournament_df[,c("USCF ID / Rtg (Pre->Post)")]), " / "), '[', 2))
+
+#Removing old id/rating column
+tournament_df <- tournament_df[, -which(names(tournament_df) %in% "USCF ID / Rtg (Pre->Post)")]
+
+#Creating pre rating column
+tournament_df$PreRating <-
+  unlist(lapply(
+    strsplit(as.character(tournament_df[,c("Rtg (Pre->Post)")]), "->"), '[', 1))
+
+#Creating post rating column
+tournament_df$PostRating <-
+  unlist(lapply(
+    strsplit(as.character(tournament_df[,c("Rtg (Pre->Post)")]), "->"), '[', 2))
+
+#Removing old pre/post rating column
+tournament_df <- tournament_df[,-which(names(tournament_df) %in% "Rtg (Pre->Post)")]
+```
+
+7. I cleaned up the new pre and post rating columns by removing any excess string. (Some of the ratings had a P followed by a list of numbers, which I removed as it was not relevant to this project.)
+```{r clean-up-ratings, echo=TRUE}
+#Remove "R:" from pre rating number
+tournament_df$PreRating <- gsub("R: ", "", tournament_df$PreRating)
+
+#Remove P from pre and post rating
+tournament_df$PreRating <- gsub("()P.*", "", tournament_df$PreRating)
+tournament_df$PostRating <- gsub("()P.*", "", tournament_df$PostRating)
+```
+
+8. I split the round outcome column into round outcome and round opponent columns. This way I could easily match a round opponent to his pre tournament ranking.
+```{r create-round opponent, echo=TRUE}
+#Create new columns and populate values
+for (col in names(tournament_df)){
+  if (grepl("Outcome",col)){
+    #Opponent column
+    tournament_df[,c(gsub("Outcome", "Opponent", col))] <-
+      unlist(lapply(strsplit(as.character(tournament_df[,c(col)]), "  "), '[', 2))
+    #Outcome column
+    tournament_df[,c(col)] <- gsub("([A-Z]).*","\\1",tournament_df[,c(col)])}}
+
+#Clean up white spaces
+for (i in names(tournament_df)) {
+  tournament_df[[i]] <-
+    trimws(tournament_df[[i]], which = c("both", "left", "right"), whitespace = "[ \t\r\n]")}
+```
+
+9. I created the opponent pre tournament chess rating by matching the round opponent pair number to the tournament data frame pair number, grabbing the value in the *PreRating* column, and writing it in the corresponding row and column
+```{r create-opp-rtg, echo=TRUE}
+for (i in seq(nrow(tournament_df))){
+  for (col in names(tournament_df)){
+    if (grepl("Opponent",col)){
+        tournament_df[i,c(gsub("Opponent","Opp PreRtg",col))] <-
+          ifelse(
+            is.na(tournament_df[i,col]), NA,
+            tournament_df$PreRating[tournament_df$`Pair Num` == tournament_df[i,col]])}}}
+```
+
+10. Finally, I reorganized the columns for readability. This was the final raw data frame. This is still a raw dataframe as it is too wide making it very unreadable, as seen in the example below.
+```{r reorganize-tournament-df}
+tournament_df <- tournament_df[,c("Pair Num", "State", "Player Name", "USCFID", "PreRating",
+                                  "PostRating", "Total Pts", "N Count", "Round 1 Opponent",
+                                  "Round 1 Opp PreRtg", "Round 1 Outcome", "Round 1 Pieces",
+                                  "Round 2 Opponent", "Round 2 Opp PreRtg", "Round 2 Outcome",
+                                  "Round 2 Pieces", "Round 3 Opponent", "Round 3 Opp PreRtg",
+                                  "Round 3 Outcome", "Round 3 Pieces", "Round 4 Opponent",
+                                  "Round 4 Opp PreRtg", "Round 4 Outcome", "Round 4 Pieces",
+                                  "Round 5 Opponent", "Round 5 Opp PreRtg", "Round 5 Outcome",
+                                  "Round 5 Pieces", "Round 6 Opponent", "Round 6 Opp PreRtg",
+                                  "Round 6 Outcome", "Round 6 Pieces", "Round 7 Opponent",
+                                  "Round 7 Opp PreRtg", "Round 7 Outcome", "Round 7 Pieces")]
+```
+```{r}
+kable(head(tournament_df,5),caption = "Data dump of chess tournament (example first 5 rows)") %>%
+  kable_styling(bootstrap_options = c("striped","condensed"), full_width = F)
+```
+
+# Creating the CSV file
+For this project we were asked to generate a .CSV file (that could for example be imported into a SQL database) with the following information for all of the players:
+
+* Player’s Name
+* Player’s State
+* Total Number of Points
+* Player’s Pre-Rating
+* Average Pre Chess Rating of Opponents
+
+The first 4 columns of the csv file were completed in the previous section. I used this section to create the final column for the CSV table *Average Pre Chess Rating of Opponents*.
+
+1. I converted the opponent pre rating fields, which I summed in the next step, into numeric columns using a for loop.
+```{r converting-numeric, echo=TRUE}
+for (col in names(tournament_df)){
+  if (grepl("PreRtg",col)){
+    tournament_df[,c(col)] <- as.numeric(tournament_df[,c(col)])}}
+```
+
+2. I summed up all the pre game ratings of each opponent while also summing up the number of games played. I did this by using the *rowSums* function while ignoring the NA since some participants did not play a full 7 rounds.
+```{r summing-prertgs, echo=TRUE}
+#Creating pre rating sum
+tournament_df$OppPreRtgSum <-
+  rowSums(tournament_df[,c("Round 1 Opp PreRtg", "Round 2 Opp PreRtg", "Round 3 Opp PreRtg",
+                           "Round 4 Opp PreRtg", "Round 5 Opp PreRtg", "Round 6 Opp PreRtg",
+                           "Round 7 Opp PreRtg")], na.rm = TRUE)
+
+#Creating games played
+tournament_df$GamesPlayed <-
+  rowSums(!is.na(tournament_df[,c("Round 1 Opp PreRtg", "Round 2 Opp PreRtg", "Round 3 Opp PreRtg",
+                                  "Round 4 Opp PreRtg", "Round 5 Opp PreRtg", "Round 6 Opp PreRtg",
+                                  "Round 7 Opp PreRtg")]))
+```
+
+3. I divided the total sum of pre tournament ratings by the number of games played to get the average opponent rating for each tournament participant.
+```{r creating-avg-opp-rtg, echo=TRUE}
+tournament_df <- tournament_df %>%
+  mutate(AvgOppRtg = OppPreRtgSum/GamesPlayed)
+```
+
+4. I created the export csv table as asked in number 5. As seen below:
+```{r renaming-columns}
+tournament_df <- rename(tournament_df, c("Player's Name" = "Player Name",
+                                         "Player's State" = "State",
+                                         "Total Number of Points" = "Total Pts",
+                                         "Player's Pre-Rating" = "PreRating",
+                                         "Average Pre Chess Rating of Opponents" = "AvgOppRtg"))
+```
+```{r creating-csv}
+write.csv(tournament_df[,c("Player's Name", "Player's State","Total Number of Points",
+                           "Player's Pre-Rating",
+                           "Average Pre Chess Rating of Opponents")],
+          "./tournament_data.csv", row.names = FALSE)
+```
+```{r results='asis'}
+tournament_df[,c("Player's Name","Player's State","Total Number of Points",
+                 "Player's Pre-Rating","Average Pre Chess Rating of Opponents")] %>%
+  kbl(caption = "Final Chess Tournament Table") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+\newpage
+
+
+***
+
+
+
+<div class="tocify-extend-page" data-unique="tocify-extend-page" style="height: 0;"></div>
+
